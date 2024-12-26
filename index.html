@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000005;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    
+    #canvas {
+      background: #000005;
+    }
+    
+    .controls {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      color: #666;
+      font-family: monospace;
+    }
+    
+    .mass-display {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      color: #aaa;
+      font-family: monospace;
+      font-size: 18px;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 5px;
+    }
+    
+    button {
+      background: #333;
+      color: #aaa;
+      border: 1px solid #444;
+      padding: 5px 10px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    
+    button:hover {
+      background: #444;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button onclick="reset()">Reset</button>
+    <button onclick="togglePause()">Pause/Play</button>
+  </div>
+  <div class="mass-display" id="massDisplay">
+    Largest Mass: 0.0
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    let paused = false;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    
+    class Particle {
+      constructor(x, y, isCentralMass = false) {
+        this.init(x, y, isCentralMass);
+      }
+
+      init(x, y, isCentralMass) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 8;
+        this.vy = (Math.random() - 0.5) * 8;
+        this.mass = isCentralMass ? 20 : (Math.random() * 2 + 0.5);
+        this.radius = Math.sqrt(this.mass) * 2;
+        this.merged = false;
+        this.isCentralMass = isCentralMass;
+        this.updateColor();
+      }
+      
+      updateColor() {
+        const velocity = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+        const energy = 0.5 * this.mass * velocity * velocity;
+        
+        if (this.isCentralMass) {
+          this.color = `hsla(60, 100%, 90%, 0.9)`;
+          this.glowColor = `hsla(220, 100%, 70%, 0.3)`;
+        } else if (energy < 10) {
+          const hue = Math.min(60, energy * 6);
+          this.color = `hsla(${hue}, 100%, 50%, 0.8)`;
+        } else if (energy < 30) {
+          const lightness = Math.min(90, 50 + (energy - 10) * 2);
+          this.color = `hsla(60, 100%, ${lightness}%, 0.8)`;
+        } else {
+          const hue = 240 + Math.min(60, (energy - 30) * 2);
+          this.color = `hsla(${hue}, 80%, 60%, 0.8)`;
+        }
+      }
+      
+      update(particles) {
+        if (paused || this.merged) return;
+        
+        const dx = centerX - this.x;
+        const dy = centerY - this.y;
+        const distanceToCenter = Math.sqrt(dx * dx + dy * dy);
+        
+        if (!this.isCentralMass) {
+          const centralForce = 2 / (distanceToCenter * distanceToCenter);
+          const angleToCenter = Math.atan2(dy, dx);
+          this.vx += Math.cos(angleToCenter) * centralForce;
+          this.vy += Math.sin(angleToCenter) * centralForce;
+        }
+        
+        particles.forEach(particle => {
+          if (particle === this || particle.merged) return;
+          
+          const dx = particle.x - this.x;
+          const dy = particle.y - this.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance < (this.radius + particle.radius)) {
+            if (this.mass >= particle.mass) {
+              const totalMass = this.mass + particle.mass;
+              const dampening = Math.max(0.5, 1 - this.mass/100);
+              this.vx = ((this.vx * this.mass + particle.vx * particle.mass) / totalMass) * dampening;
+              this.vy = ((this.vy * this.mass + particle.vy * particle.mass) / totalMass) * dampening;
+              this.mass = totalMass;
+              this.radius = Math.sqrt(this.mass) * 2;
+              particle.merged = true;
+              
+              if (this.mass > 50) {
+                this.isCentralMass = true;
+              }
+            }
+            return;
+          }
+          
+          if (distance < 1) return;
+          
+          const force = (particle.mass * this.mass) / (distance * distance);
+          const angle = Math.atan2(dy, dx);
+          
+          const forceFactor = this.isCentralMass ? 0.05 : 0.1;
+          this.vx += Math.cos(angle) * force * forceFactor;
+          this.vy += Math.sin(angle) * force * forceFactor;
+        });
+        
+        const friction = Math.max(0.98, 0.999 - this.mass/1000);
+        this.vx *= friction;
+        this.vy *= friction;
+        
+        if (this.isCentralMass) {
+          const massSlowdown = Math.max(0.1, 1 - this.mass/100);
+          this.x += this.vx * massSlowdown;
+          this.y += this.vy * massSlowdown;
+        } else {
+          this.x += this.vx;
+          this.y += this.vy;
+        }
+        
+        if (this.x < 0) this.x = canvas.width;
+        if (this.x > canvas.width) this.x = 0;
+        if (this.y < 0) this.y = canvas.height;
+        if (this.y > canvas.height) this.y = 0;
+        
+        this.updateColor();
+      }
+      
+      draw() {
+        if (this.merged) return;
+        
+        if (this.isCentralMass) {
+          const gradientRadius = this.radius * 3;
+          const gradient = ctx.createRadialGradient(
+            this.x, this.y, this.radius * 0.5,
+            this.x, this.y, gradientRadius
+          );
+          gradient.addColorStop(0, this.color);
+          gradient.addColorStop(0.3, this.glowColor);
+          gradient.addColorStop(1, 'rgba(0,0,0,0)');
+          
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, gradientRadius, 0, Math.PI * 2);
+          ctx.fillStyle = gradient;
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.fillStyle = this.color;
+          ctx.fill();
+          
+          const velocity = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+          const energy = 0.5 * this.mass * velocity * velocity;
+          if (energy > 5) {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius * (1 + energy/20), 0, Math.PI * 2);
+            ctx.fillStyle = this.color.replace('0.8', '0.3');
+            ctx.fill();
+          }
+        }
+      }
+    }
+    
+    let particles = [];
+    const maxParticles = 400;
+    
+    function spawnParticle() {
+      if (particles.length >= maxParticles) return;
+      
+      let x, y;
+      const side = Math.floor(Math.random() * 4);
+      switch(side) {
+        case 0:
+          x = Math.random() * canvas.width;
+          y = 0;
+          break;
+        case 1:
+          x = canvas.width;
+          y = Math.random() * canvas.height;
+          break;
+        case 2:
+          x = Math.random() * canvas.width;
+          y = canvas.height;
+          break;
+        case 3:
+          x = 0;
+          y = Math.random() * canvas.height;
+          break;
+      }
+      
+      particles.push(new Particle(x, y, false));
+    }
+    
+    function reset() {
+      particles = [];
+      for (let i = 0; i < 200; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        particles.push(new Particle(x, y, false));
+      }
+    }
+    
+    function togglePause() {
+      paused = !paused;
+    }
+    
+    function animate() {
+      ctx.fillStyle = 'rgba(0, 0, 5, 0.2)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      if (Math.random() < 0.1) {
+        spawnParticle();
+      }
+      
+      particles = particles.filter(p => !p.merged);
+      
+      // Find largest mass
+      let largestMass = 0;
+      particles.forEach(particle => {
+        if (particle.mass > largestMass) {
+          largestMass = particle.mass;
+        }
+      });
+      
+      // Update mass display
+      document.getElementById('massDisplay').textContent = 
+        `Largest Mass: ${largestMass.toFixed(1)}`;
+      
+      particles.forEach(particle => {
+        particle.update(particles);
+        particle.draw();
+      });
+      
+      requestAnimationFrame(animate);
+    }
+    
+    reset();
+    animate();
+  </script>
+</body>
+</html>
